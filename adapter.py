@@ -4,44 +4,46 @@ of the GNU General Public License, v. 3.0. If a copy of the GNU General
 Public License was not distributed with this file, see <https://www.gnu.org/licenses/>.
 """
 
+from typing import Dict, Any
 from protocol_interfaces import OAuth2ProtocolInterface
 from logutils import get_logger
 
 logger = get_logger(__name__)
 
-"""
-Developer Guide - Protocol Adapter Template
 
-Purpose:
----------
-This file serves as a template for creating platform-specific protocol adapters 
-that implement a defined communication protocol, such as OAuth2.
+class BlueskyOAuth2Adapter(OAuth2ProtocolInterface):
+    """Adapter for integrating Bluesky's OAuth2 protocol."""
 
-Usage:
-------
-To implement a new protocol adapter:
-1. Choose the appropriate protocol interface (e.g., OAuth2ProtocolInterface).
-2. Create a new class following the naming convention: <PlatformName><Protocol>Adapter.
-   Example: GmailOAuth2Adapter
-3. Subclass the selected protocol interface.
-4. Implement all abstract methods defined in the interface.
-5. Add any necessary platform-specific logic or configuration handling.
+    def get_authorization_url(self, **kwargs) -> Dict[str, Any]:
+        code_verifier = kwargs.get("code_verifier")
+        autogenerate_code_verifier = kwargs.pop("autogenerate_code_verifier", False)
+        redirect_url = kwargs.pop("redirect_url", None)
 
-Notes:
-------
-- The protocol interface provides `.manifest` and `.config` attributes for accessing 
-    adapter metadata and settings.
+        if autogenerate_code_verifier and not code_verifier:
+            code_verifier = self.generate_code_verifier(48)
+            kwargs["code_verifier"] = code_verifier
+            self.session.code_challenge_method = "S256"
 
-Example:
---------
-See the sample `GmailOAuth2Adapter` class below.
-"""
+        if code_verifier:
+            kwargs["code_verifier"] = code_verifier
+            self.session.code_challenge_method = "S256"
 
+        if redirect_url:
+            self.session.redirect_uri = redirect_url
 
-class GmailOAuth2Adapter(OAuth2ProtocolInterface):
-    """
-    Sample implementation of a Gmail adapter using the OAuth2 protocol.
-    Use this class as a reference for building custom platform adapters.
-    """
+        params = {**self.default_config["params"], **kwargs}
 
-    # TODO: Implement required methods defined in OAuth2ProtocolInterface
+        authorization_url, state = self.session.create_authorization_url(
+            self.default_config["urls"]["auth_uri"], **params
+        )
+
+        logger.debug("Authorization URL generated: %s", authorization_url)
+
+        return {
+            "authorization_url": authorization_url,
+            "state": state,
+            "code_verifier": code_verifier,
+            "client_id": self.credentials["client_id"],
+            "scope": ",".join(self.default_config["params"]["scope"]),
+            "redirect_uri": self.session.redirect_uri,
+        }
