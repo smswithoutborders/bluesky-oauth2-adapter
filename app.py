@@ -30,12 +30,21 @@ def oauth_callback():
     """Endpoint for receiving "callback" responses from the Authorization Server,
     to complete the auth flow.
     """
-    state = request.args["state"]
-    authserver_iss = request.args["iss"]
-    authorization_code = request.args["code"]
-
-    print(f"State: {state}")
-    print(f"Auth Server ISS: {authserver_iss}")
-    print(f"Authorization Code: {authorization_code}")
-
-    return None, 204  # No content response
+    params = request.args.to_dict(flat=False)
+    table_rows = ""
+    for key, values in params.items():
+        for value in values:
+            table_rows += f"<tr><td>{key}</td><td>{value}</td></tr>"
+    html = f"""
+    <html>
+        <head><title>OAuth Callback Params</title></head>
+        <body>
+            <h2>Received Callback Parameters</h2>
+            <table border="1">
+                <tr><th>Parameter</th><th>Value</th></tr>
+                {table_rows}
+            </table>
+        </body>
+    </html>
+    """
+    return html
