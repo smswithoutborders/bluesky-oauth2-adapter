@@ -235,13 +235,7 @@ class BlueskyOAuth2Adapter(OAuth2ProtocolInterface):
         redirect_url = kwargs.pop("redirect_url", None)
         client_id = self.credentials["client_id"]
 
-        try:
-            authserver_url = resolve_pds_authserver(
-                self.default_config["urls"]["pds_url"]
-            )
-        except Exception as err:
-            logger.error("Failed to resolve PDS auth server: %s", err)
-            raise
+        authserver_url = self.default_config["urls"]["pds_url"]
 
         if not is_safe_url(authserver_url):
             logger.error("Insecure auth server URL: %s", authserver_url)

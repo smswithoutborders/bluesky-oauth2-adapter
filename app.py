@@ -4,6 +4,7 @@ of the GNU General Public License, v. 3.0. If a copy of the GNU General
 Public License was not distributed with this file, see <https://www.gnu.org/licenses/>.
 """
 
+import json
 from flask import Flask, jsonify, request
 
 app = Flask(__name__)
@@ -16,23 +17,12 @@ def oauth_client_metadata():
     "client_id" of the app. This implementation dynamically uses the HTTP request
     Host name to infer the "client_id".
     """
-    app_url = request.url_root.replace("http://", "https://")
-    client_id = f"{app_url}oauth/client-metadata.json"
+    with open("credentials.json", "r", encoding="utf-8") as f:
+        credentials = f.read()
+        if not credentials:
+            return jsonify({"error": "Credentials not found"}), 404
 
-    return jsonify(
-        {
-            "client_id": client_id,
-            "dpop_bound_access_tokens": True,
-            "application_type": "web",
-            "redirect_uris": [f"{app_url}oauth/callback"],
-            "grant_types": ["authorization_code", "refresh_token"],
-            "response_types": ["code"],
-            "scope": "atproto transition:generic",
-            "token_endpoint_auth_method": None,
-            "client_name": "Demo Bluesky OAuth2 Adapter.",
-            "client_uri": app_url,
-        }
-    )
+    return jsonify(json.loads(credentials))
 
 
 @app.route("/oauth/callback")
@@ -43,3 +33,9 @@ def oauth_callback():
     state = request.args["state"]
     authserver_iss = request.args["iss"]
     authorization_code = request.args["code"]
+
+    print(f"State: {state}")
+    print(f"Auth Server ISS: {authserver_iss}")
+    print(f"Authorization Code: {authorization_code}")
+
+    return None, 204  # No content response
