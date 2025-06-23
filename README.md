@@ -76,6 +76,50 @@ sudo apt install build-essential python3-dev
 }
 ```
 
+> [!TIP]
+>
+> If you are developing on localhost, OAuth2 authorization servers require HTTPS protocol for redirect URIs. You can use tools like [ngrok](https://ngrok.com/), [localtunnel](https://github.com/localtunnel/localtunnel), or [VS Code tunnel](https://code.visualstudio.com/docs/remote/tunnels) to tunnel your localhost to an HTTPS alternative.
+
+## Using the CLI
+
+> [!NOTE]
+>
+> Use the `--help` flag with any command to see the available parameters and their descriptions.
+
+### 1. **Generate Authorization URL**
+
+Use the `auth-url` command to generate the OAuth2 authorization URL.
+
+```bash
+python3 bluesky_cli.py auth-url -o session.json
+```
+
+- `-o`: Save the output to `session.json`.
+
+### 2. **Exchange Authorization Code**
+
+Use the `exchange` command to exchange the authorization code for tokens and user info.
+
+```bash
+python3 bluesky_cli.py exchange -c auth_code -o session.json -f session.json
+```
+
+- `-c`: Authorization code.
+- `-o`: Save the output to `session.json`.
+- `-f`: Read parameters from `session.json`.
+
+### 3. **Send a Message**
+
+Use the `send-message` command to send a message using the adapter.
+
+```bash
+python3 bluesky_cli.py send-message -f session.json -m "Hello, Bluesky!" -o session.json
+```
+
+- `-f`: Read parameters from `session.json`.
+- `-m`: Message to send.
+- `-o`: Save the output to `session.json`.
+
 ## TODO
 
 - Support additional PDS providers beyond just https://bsky.social

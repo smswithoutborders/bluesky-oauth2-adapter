@@ -8,6 +8,7 @@ import re
 import os
 import json
 import time
+from datetime import datetime, timezone
 from typing import Dict, Any, Tuple, Optional
 from urllib.parse import urlparse, urlencode
 from authlib.jose import JsonWebKey
@@ -369,6 +370,109 @@ def initial_token_request(
     return token_body, dpop_authserver_nonce
 
 
+def pds_dpop_jwt(
+    method: str,
+    url: str,
+    access_token: str,
+    nonce: str,
+    dpop_private_jwk: JsonWebKey,
+) -> str:
+    dpop_pub_jwk = json.loads(dpop_private_jwk.as_json(is_private=False))
+    body = {
+        "iat": int(time.time()),
+        "exp": int(time.time()) + 10,
+        "jti": generate_token(),
+        "htm": method,
+        "htu": url,
+        "ath": create_s256_code_challenge(access_token),
+    }
+    if nonce:
+        body["nonce"] = nonce
+    dpop_proof = jwt.encode(
+        {"typ": "dpop+jwt", "alg": "ES256", "jwk": dpop_pub_jwk},
+        body,
+        dpop_private_jwk,
+    ).decode("utf-8")
+    return dpop_proof
+
+
+def pds_authed_req(method: str, url: str, token: dict, body=None) -> Any:
+    dpop_private_jwk = JsonWebKey.import_key(json.loads(token["dpop_private_jwk"]))
+    dpop_pds_nonce = token.get("dpop_pds_nonce")
+    access_token = token["access_token"]
+
+    for i in range(2):
+        dpop_jwt = pds_dpop_jwt(
+            method,
+            url,
+            access_token,
+            dpop_pds_nonce,
+            dpop_private_jwk,
+        )
+
+        with hardened_http.get_session() as sess:
+            resp = sess.post(
+                url,
+                headers={
+                    "Authorization": f"DPoP {access_token}",
+                    "DPoP": dpop_jwt,
+                },
+                json=body,
+            )
+
+        if resp.status_code in [400, 401] and resp.json()["error"] == "use_dpop_nonce":
+            dpop_pds_nonce = resp.headers["DPoP-Nonce"]
+            logger.warning("Retrying with new PDS DPoP nonce: %s", dpop_pds_nonce)
+            # TODO: return the new nonce to the caller
+            continue
+        break
+
+    return resp
+
+
+def refresh_token_request(token: dict, client_id: str) -> Tuple[dict, str]:
+    authserver_url = token["authserver_iss"]
+    authserver_meta = fetch_authserver_meta(authserver_url)
+
+    params = {
+        "client_id": client_id,
+        "grant_type": "refresh_token",
+        "refresh_token": token["refresh_token"],
+    }
+
+    token_url = authserver_meta["token_endpoint"]
+    dpop_private_jwk = JsonWebKey.import_key(json.loads(token["dpop_private_jwk"]))
+    dpop_authserver_nonce = token["dpop_authserver_nonce"]
+    dpop_proof = authserver_dpop_jwt(
+        "POST", token_url, dpop_authserver_nonce, dpop_private_jwk
+    )
+
+    assert is_safe_url(token_url)
+    with hardened_http.get_session() as sess:
+        resp = sess.post(token_url, data=params, headers={"DPoP": dpop_proof})
+
+    if resp.status_code == 400 and resp.json()["error"] == "use_dpop_nonce":
+        dpop_authserver_nonce = resp.headers["DPoP-Nonce"]
+        logger.warning(
+            "DPoP nonce required by auth server, retrying with new nonce: %s.",
+            dpop_authserver_nonce,
+        )
+        dpop_proof = authserver_dpop_jwt(
+            "POST", token_url, dpop_authserver_nonce, dpop_private_jwk
+        )
+        with hardened_http.get_session() as sess:
+            resp = sess.post(token_url, data=params, headers={"DPoP": dpop_proof})
+
+    if resp.status_code not in [200, 201]:
+        logger.error("Token Refresh Error: %s", resp.json())
+
+    resp.raise_for_status()
+    token_body = resp.json()
+    token_body["dpop_authserver_nonce"] = dpop_authserver_nonce
+
+    return token_body, dpop_authserver_nonce
+
+
 hardened_http = requests_hardened.Manager(
     requests_hardened.Config(
         default_timeout=(2, 10),
@@ -495,12 +599,46 @@ class BlueskyOAuth2Adapter(OAuth2ProtocolInterface):
         if " ".join(self.default_config["params"]["scope"]) != tokens["scope"]:
             raise ValueError("Scope mismatch.")
 
+        tokens["pds_url"] = pds_url
+        tokens["authserver_iss"] = authserver_url
+        tokens["dpop_authserver_nonce"] = dpop_authserver_nonce
+        tokens["dpop_private_jwk"] = dpop_private_jwk
+
         userinfo = {"account_identifier": handle}
 
         return {"token": tokens, "userinfo": userinfo}
 
     def revoke_token(self, token, **kwargs):
-        return super().revoke_token(token, **kwargs)
+        return True
 
     def send_message(self, token, message, **kwargs):
-        return super().send_message(token, message, **kwargs)
+        pds_url = token["pds_url"]
+        did = token["sub"]
+        req_url = f"{pds_url}/xrpc/com.atproto.repo.createRecord"
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+        body = {
+            "repo": did,
+            "collection": "app.bsky.feed.post",
+            "record": {
+                "$type": "app.bsky.feed.post",
+                "text": message,
+                "createdAt": now,
+            },
+        }
+
+        refreshed_token, dpop_authserver_nonce = refresh_token_request(
+            token=token, client_id=self.credentials["client_id"]
+        )
+        refreshed_token["dpop_authserver_nonce"] = dpop_authserver_nonce
+        refreshed_token["dpop_private_jwk"] = token["dpop_private_jwk"]
+        refreshed_token["pds_url"] = pds_url
+        refreshed_token["authserver_iss"] = token["authserver_iss"]
+
+        resp = pds_authed_req("POST", req_url, token=refreshed_token, body=body)
+        if resp.status_code not in [200, 201]:
+            logger.error("PDS HTTP Error: %s", resp.json())
+        resp.raise_for_status()
+
+        logger.info("Successfully sent message.")
+        return {"success": True, "refreshed_token": refreshed_token}

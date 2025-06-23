@@ -103,5 +103,45 @@ def exchange(code, verifier, jwk, nonce, iss, redirect, output, input_file):
         print(f"Output saved to {output}")
 
 
+@cli.command("send-message")
+@click.option("-f", "--token-file", required=True, help="File containing token JSON.")
+@click.option("-m", "--message", required=True, help="Message to send.")
+@click.option(
+    "-o", "--output", default=None, help="File to save refreshed token if different."
+)
+def send_message(token_file, message, output):
+    """Send a message using the Bluesky OAuth2 Adapter."""
+    try:
+        with open(token_file, "r", encoding="utf-8") as f:
+            token = json.load(f).get("token")
+            if not token:
+                print(f"Token key not found in {token_file}.")
+                return
+    except FileNotFoundError:
+        print(f"Token file {token_file} not found.")
+        return
+
+    adapter = BlueskyOAuth2Adapter()
+    try:
+        result = adapter.send_message(token=token, message=message)
+        print_table("Send Message Result", result)
+
+        refreshed_token = result.get("refreshed_token")
+        if output and refreshed_token != token:
+            try:
+                with open(output, "r", encoding="utf-8") as f:
+                    existing_data = json.load(f)
+            except FileNotFoundError:
+                existing_data = {}
+
+            existing_data.update({"token": refreshed_token})
+
+            with open(output, "w", encoding="utf-8") as f:
+                json.dump(existing_data, f, indent=2)
+            print(f"Refreshed token saved to {output}")
+    except Exception as err:
+        print(f"Failed to send message: {err}")
+
+
 if __name__ == "__main__":
     cli()
