@@ -492,10 +492,10 @@ class BlueskyOAuth2Adapter(OAuth2ProtocolInterface):
         if authserver_url != authserver_iss:
             raise ValueError("Authorization Server mismatch.")
 
-        if self.default_config["params"]["scope"] != tokens["scope"]:
+        if " ".join(self.default_config["params"]["scope"]) != tokens["scope"]:
             raise ValueError("Scope mismatch.")
 
-        userinfo = {}
+        userinfo = {"account_identifier": handle}
 
         return {"token": tokens, "userinfo": userinfo}
 
