@@ -1,3 +1,4 @@
 Authlib==1.6.0
 dnspython==2.7.0
 requests==2.32.4
+requests-hardened==1.0.0
