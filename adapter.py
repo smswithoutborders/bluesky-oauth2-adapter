@@ -8,6 +8,7 @@ import re
 import os
 import json
 import time
+import sqlite3
 from datetime import datetime, timezone
 from typing import Dict, Any, Tuple, Optional
 from urllib.parse import urlparse, urlencode
@@ -22,6 +23,10 @@ from protocol_interfaces import OAuth2ProtocolInterface
 from logutils import get_logger
 
 logger = get_logger(__name__)
+
+DEFAULT_SESSIONS_DIR = os.path.join(
+    os.path.abspath(os.path.dirname(__file__)), "sessions"
+)
 
 DEFAULT_CONFIG = {
     "urls": {
@@ -473,6 +478,76 @@ def refresh_token_request(token: dict, client_id: str) -> Tuple[dict, str]:
     return token_body, dpop_authserver_nonce
 
 
+def db_query(
+    db_path: str,
+    query: str,
+    params: Optional[Tuple[Any, ...]] = None,
+    first: bool = False,
+) -> Any:
+    if not os.path.exists(db_path):
+        initialize_database(db_path)
+
+    logger.debug("Executing query on database: %s", db_path)
+    logger.debug("Query: %s", query)
+    if params:
+        logger.debug("Parameters: %s", params)
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        if params:
+            cursor.execute(query, params)
+        else:
+            cursor.execute(query)
+        conn.commit()
+        result = cursor.fetchall()
+        logger.info("Query executed successfully. Rows fetched: %d", len(result))
+        if first:
+            logger.debug("Returning first key of the result.")
+            return {cursor.description[0][0]: result[0][0]} if result else None
+        logger.debug("Returning full result set.")
+        print("Columns:", cursor.description)
+        return [
+            {desc[0]: row[idx] for idx, desc in enumerate(cursor.description)}
+            for row in result
+        ]
+    except sqlite3.Error as e:
+        logger.error("Database error: %s", e)
+        raise
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+        logger.debug("Database connection closed.")
+
+
+def initialize_database(db_path: str) -> None:
+    schema_path = os.path.expanduser("schema.sql")
+    schema_path = os.path.join(os.path.dirname(__file__), schema_path)
+
+    if not os.path.exists(schema_path):
+        raise FileNotFoundError(f"Schema file not found: {schema_path}")
+
+    logger.debug("Initializing database at %s using schema %s", db_path, schema_path)
+    try:
+        with open(schema_path, "r", encoding="utf-8") as schema_file:
+            schema_sql = schema_file.read()
+
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.executescript(schema_sql)
+        conn.commit()
+        logger.info("Database initialized successfully.")
+    except sqlite3.Error as e:
+        logger.error("Database initialization error: %s", e)
+        raise
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
 hardened_http = requests_hardened.Manager(
     requests_hardened.Config(
         default_timeout=(2, 10),
@@ -495,7 +570,16 @@ class BlueskyOAuth2Adapter(OAuth2ProtocolInterface):
         code_verifier = kwargs.get("code_verifier")
         autogenerate_code_verifier = kwargs.pop("autogenerate_code_verifier", False)
         redirect_url = kwargs.pop("redirect_url", None)
+        request_identifier = kwargs.pop("request_identifier", None)
+        base_path = kwargs.pop("base_path", "") or DEFAULT_SESSIONS_DIR
+        db_path = os.path.join(base_path, "oauth_session.db")
         client_id = self.credentials["client_id"]
+
+        os.makedirs(base_path, exist_ok=True)
+
+        if not request_identifier:
+            logger.error("Missing request identifier.")
+            raise ValueError("Missing request identifier for authorization URL.")
 
         authserver_url = self.default_config["urls"]["pds_url"]
 
@@ -544,6 +628,17 @@ class BlueskyOAuth2Adapter(OAuth2ProtocolInterface):
         authorization_url = f"{auth_url}?{qparam}"
 
         logger.debug("Authorization URL generated: %s", authorization_url)
+        query = "INSERT OR REPLACE INTO oauth_sessions (request_identifier, dpop_private_jwk, authserver_iss, dpop_authserver_nonce) VALUES (?, ?, ?, ?)"
+        db_query(
+            db_path,
+            query,
+            (
+                request_identifier,
+                dpop_private_jwk.as_json(is_private=True),
+                authserver_url,
+                par_result.get("dpop_authserver_nonce"),
+            ),
+        )
 
         return {
             "authorization_url": authorization_url,
@@ -552,27 +647,37 @@ class BlueskyOAuth2Adapter(OAuth2ProtocolInterface):
             "client_id": client_id,
             "scope": ",".join(self.default_config["params"]["scope"]),
             "redirect_uri": redirect_url or self.credentials["redirect_uri"],
-            "dpop_private_jwk": dpop_private_jwk.as_json(is_private=True),
-            "authserver_iss": authserver_url,
-            "dpop_authserver_nonce": par_result.get("dpop_authserver_nonce"),
         }
 
     def exchange_code_and_fetch_user_info(self, code, **kwargs):
         redirect_url = kwargs.pop("redirect_url", None)
         code_verifier = kwargs.pop("code_verifier", None)
-        authserver_iss = kwargs.pop("authserver_iss", None)
-        dpop_private_jwk = kwargs.pop("dpop_private_jwk", None)
-        dpop_authserver_nonce = kwargs.pop("dpop_authserver_nonce", None)
+        request_identifier = kwargs.pop("request_identifier", None)
+        base_path = kwargs.pop("base_path", "") or DEFAULT_SESSIONS_DIR
+        db_path = os.path.join(base_path, "oauth_session.db")
+
+        os.makedirs(base_path, exist_ok=True)
+
+        if not request_identifier:
+            logger.error("Missing request identifier.")
+            raise ValueError("Missing request identifier for authorization URL.")
 
         if not code_verifier:
             raise ValueError("PKCE code verifier is required for token exchange.")
 
-        if not dpop_private_jwk:
-            raise ValueError("DPoP private JWK is required for token exchange.")
+        query = "SELECT dpop_private_jwk, authserver_iss, dpop_authserver_nonce FROM oauth_sessions WHERE request_identifier = ?"
+        result = db_query(db_path, query, (request_identifier,), first=True)
 
-        if not dpop_authserver_nonce:
-            raise ValueError("DPoP auth server nonce is required for token exchange.")
+        print("Result:", result)
+        if not result:
+            logger.error(
+                "No session found for request identifier: %s", request_identifier
+            )
+            raise ValueError("No session found for the provided request identifier.")
 
+        dpop_private_jwk = JsonWebKey.import_key(result["dpop_private_jwk"])
+        authserver_iss = result["authserver_iss"]
+        dpop_authserver_nonce = result.get("dpop_authserver_nonce", "")
         client_id = self.credentials["client_id"]
 
         tokens, dpop_authserver_nonce = initial_token_request(
@@ -606,6 +711,9 @@ class BlueskyOAuth2Adapter(OAuth2ProtocolInterface):
 
         userinfo = {"account_identifier": handle}
 
+        query = "DELETE FROM oauth_sessions WHERE request_identifier = ?"
+        db_query(db_path, query, (request_identifier,))
+        logger.debug("Deleted session for request identifier: %s", request_identifier)
         return {"token": tokens, "userinfo": userinfo}
 
     def revoke_token(self, token, **kwargs):

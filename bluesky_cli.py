@@ -4,6 +4,8 @@ of the GNU General Public License, v. 3.0. If a copy of the GNU General
 Public License was not distributed with this file, see <https://www.gnu.org/licenses/>.
 """
 
+import os
+import base64
 import json
 import click
 from adapter import BlueskyOAuth2Adapter
@@ -34,11 +36,14 @@ def cli():
 def auth_url(pkce, redirect, state, output):
     """Get the OAuth2 authorization URL."""
     adapter = BlueskyOAuth2Adapter()
+    request_identifier = base64.b64encode(os.urandom(32)).decode("utf-8")
     result = adapter.get_authorization_url(
         autogenerate_code_verifier=pkce,
         redirect_url=redirect,
         state=state,
+        request_identifier=request_identifier,
     )
+    result["request_identifier"] = request_identifier
     print_table("Authorization URL Result", result)
     if output:
         with open(output, "w", encoding="utf-8") as f:
@@ -49,9 +54,6 @@ def auth_url(pkce, redirect, state, output):
 @cli.command("exchange")
 @click.option("-c", "--code", required=True, help="Authorization code")
 @click.option("-v", "--verifier", help="PKCE code verifier")
-@click.option("-j", "--jwk", help="DPoP private JWK (JSON string)")
-@click.option("-n", "--nonce", help="DPoP auth server nonce")
-@click.option("-i", "--iss", help="Auth server issuer URL")
 @click.option("-r", "--redirect", help="Redirect URI")
 @click.option(
     "-o", "--output", default=None, help="File to read/write the output as JSON."
@@ -59,18 +61,17 @@ def auth_url(pkce, redirect, state, output):
 @click.option(
     "-f", "--input-file", default=None, help="File to read parameters from as JSON."
 )
-def exchange(code, verifier, jwk, nonce, iss, redirect, output, input_file):
+def exchange(code, verifier, redirect, output, input_file):
     """Exchange code and fetch userinfo."""
+    request_identifier = None
     if input_file:
         try:
             with open(input_file, "r", encoding="utf-8") as f:
                 params = json.load(f)
             code = code or params.get("authorization_code")
             verifier = verifier or params.get("code_verifier")
-            jwk = jwk or params.get("dpop_private_jwk")
-            nonce = nonce or params.get("dpop_authserver_nonce")
-            iss = iss or params.get("authserver_iss")
             redirect = redirect or params.get("redirect_uri")
+            request_identifier = params.get("request_identifier")
         except FileNotFoundError:
             print(f"Input file {input_file} not found.")
             return
@@ -79,10 +80,8 @@ def exchange(code, verifier, jwk, nonce, iss, redirect, output, input_file):
     result = adapter.exchange_code_and_fetch_user_info(
         code=code,
         code_verifier=verifier,
-        dpop_private_jwk=jwk,
-        dpop_authserver_nonce=nonce,
-        authserver_iss=iss,
         redirect_url=redirect,
+        request_identifier=request_identifier,
     )
     print_table("Token Result", result.get("token", {}))
     print_table("User Info", result.get("userinfo", {}))
