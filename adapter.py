@@ -684,7 +684,6 @@ class BlueskyOAuth2Adapter(OAuth2ProtocolInterface):
         query = "SELECT dpop_private_jwk, authserver_iss, dpop_authserver_nonce FROM oauth_sessions WHERE request_identifier = ?"
         result = db_query(db_path, query, (request_identifier,), first=True)
 
-        print("Result:", result)
         if not result:
             logger.error(
                 "No session found for request identifier: %s", request_identifier
