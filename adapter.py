@@ -491,6 +491,10 @@ def db_query(
     logger.debug("Query: %s", query)
     if params:
         logger.debug("Parameters: %s", params)
+
+    conn = None
+    cursor = None
+
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
@@ -498,25 +502,37 @@ def db_query(
             cursor.execute(query, params)
         else:
             cursor.execute(query)
+
         conn.commit()
         result = cursor.fetchall()
         logger.info("Query executed successfully. Rows fetched: %d", len(result))
+
+        if cursor.description is None:
+            return None
+
         if first:
-            logger.debug("Returning first key of the result.")
-            return {cursor.description[0][0]: result[0][0]} if result else None
-        logger.debug("Returning full result set.")
-        print("Columns:", cursor.description)
+            if result:
+                logger.debug("Returning first row as dictionary.")
+                return {
+                    desc[0]: result[0][idx]
+                    for idx, desc in enumerate(cursor.description)
+                }
+            else:
+                return None
+
+        logger.debug("Returning full result set as list of dictionaries.")
         return [
             {desc[0]: row[idx] for idx, desc in enumerate(cursor.description)}
             for row in result
         ]
+
     except sqlite3.Error as e:
         logger.error("Database error: %s", e)
         raise
     finally:
-        if cursor:
+        if cursor is not None:
             cursor.close()
-        if conn:
+        if conn is not None:
             conn.close()
         logger.debug("Database connection closed.")
 
@@ -675,9 +691,9 @@ class BlueskyOAuth2Adapter(OAuth2ProtocolInterface):
             )
             raise ValueError("No session found for the provided request identifier.")
 
-        dpop_private_jwk = JsonWebKey.import_key(result["dpop_private_jwk"])
+        dpop_private_jwk = result["dpop_private_jwk"]
         authserver_iss = result["authserver_iss"]
-        dpop_authserver_nonce = result.get("dpop_authserver_nonce", "")
+        dpop_authserver_nonce = result["dpop_authserver_nonce"]
         client_id = self.credentials["client_id"]
 
         tokens, dpop_authserver_nonce = initial_token_request(
