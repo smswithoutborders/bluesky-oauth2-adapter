@@ -771,6 +771,6 @@ class BlueskyOAuth2Adapter(OAuth2ProtocolInterface):
             logger.error("Failed to send message: %s", e)
             return {
                 "success": False,
-                "error": e.response.text,
+                "message": e.response.text,
                 "refreshed_token": refreshed_token,
             }
