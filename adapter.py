@@ -9,6 +9,8 @@ import os
 import json
 import time
 import sqlite3
+import math
+import textwrap
 from datetime import datetime, timezone
 from typing import Dict, Any, Tuple, Optional
 from urllib.parse import urlparse, urlencode
@@ -42,6 +44,8 @@ HANDLE_REGEX = (
     r"+[a-zA-Z]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$"
 )
 DID_REGEX = r"^did:[a-z]+:[a-zA-Z0-9._:%-]*[a-zA-Z0-9._-]$"
+
+BLUESKY_CHARACTER_LIMIT = 300
 
 
 def load_credentials(configs: Dict[str, Any]) -> Dict[str, str]:
@@ -575,6 +579,41 @@ hardened_http = requests_hardened.Manager(
 )
 
 
+def split_message_into_chunks(
+    message: str, max_length: int = BLUESKY_CHARACTER_LIMIT
+) -> list:
+    """Split a message into chunks that fit within Bluesky's character limit."""
+    message_length = len(message)
+    if message_length <= max_length:
+        return [message]
+
+    # Account for thread indicator like " (1/3)" - reserve 10 chars
+    effective_max_length = max_length - 10
+
+    threads_required = math.ceil(message_length / effective_max_length)
+    chars_per_thread = math.ceil(message_length / threads_required)
+
+    return textwrap.wrap(message, chars_per_thread, break_long_words=False)
+
+
+def create_post_payload(did: str, text: str, created_at: str, reply_to=None) -> dict:
+    """Create a Bluesky post payload."""
+    payload = {
+        "repo": did,
+        "collection": "app.bsky.feed.post",
+        "record": {
+            "$type": "app.bsky.feed.post",
+            "text": text,
+            "createdAt": created_at,
+        },
+    }
+
+    if reply_to is not None:
+        payload["record"]["reply"] = reply_to
+
+    return payload
+
+
 class BlueskyOAuth2Adapter(OAuth2ProtocolInterface):
     """Adapter for integrating Bluesky's OAuth2 protocol."""
 
@@ -740,15 +779,7 @@ class BlueskyOAuth2Adapter(OAuth2ProtocolInterface):
         req_url = f"{pds_url}/xrpc/com.atproto.repo.createRecord"
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
-        body = {
-            "repo": did,
-            "collection": "app.bsky.feed.post",
-            "record": {
-                "$type": "app.bsky.feed.post",
-                "text": message,
-                "createdAt": now,
-            },
-        }
+        message_chunks = split_message_into_chunks(message)
 
         refreshed_token = token
         try:
@@ -760,12 +791,39 @@ class BlueskyOAuth2Adapter(OAuth2ProtocolInterface):
             refreshed_token["pds_url"] = pds_url
             refreshed_token["authserver_iss"] = token["authserver_iss"]
 
-            resp = pds_authed_req("POST", req_url, token=refreshed_token, body=body)
-            if resp.status_code not in [200, 201]:
-                logger.error("PDS HTTP Error: %s", resp.json())
-            resp.raise_for_status()
+            thread_posts = []
+            parent_post = None
+            root_post = None
 
-            logger.info("Successfully sent message.")
+            for i, chunk in enumerate(message_chunks):
+                if len(message_chunks) > 1:
+                    thread_text = f"{chunk} ({i+1}/{len(message_chunks)})"
+                else:
+                    thread_text = chunk
+
+                reply_to = None
+                if parent_post:
+                    reply_to = {"root": root_post, "parent": parent_post}
+
+                body = create_post_payload(did, thread_text, now, reply_to)
+
+                resp = pds_authed_req("POST", req_url, token=refreshed_token, body=body)
+                if resp.status_code not in [200, 201]:
+                    logger.error("PDS HTTP Error: %s", resp.json())
+                resp.raise_for_status()
+
+                post_data = resp.json()
+                post_reference = {"uri": post_data["uri"], "cid": post_data["cid"]}
+
+                thread_posts.append(post_reference)
+
+                if i == 0:
+                    root_post = post_reference
+                parent_post = post_reference
+
+                now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+            logger.info("Successfully sent message with %d posts.", len(thread_posts))
             return {"success": True, "refreshed_token": refreshed_token}
         except requests.exceptions.HTTPError as e:
             logger.error("Failed to send message: %s", e)
