@@ -750,18 +750,27 @@ class BlueskyOAuth2Adapter(OAuth2ProtocolInterface):
             },
         }
 
-        refreshed_token, dpop_authserver_nonce = refresh_token_request(
-            token=token, client_id=self.credentials["client_id"]
-        )
-        refreshed_token["dpop_authserver_nonce"] = dpop_authserver_nonce
-        refreshed_token["dpop_private_jwk"] = token["dpop_private_jwk"]
-        refreshed_token["pds_url"] = pds_url
-        refreshed_token["authserver_iss"] = token["authserver_iss"]
+        refreshed_token = token
+        try:
+            refreshed_token, dpop_authserver_nonce = refresh_token_request(
+                token=token, client_id=self.credentials["client_id"]
+            )
+            refreshed_token["dpop_authserver_nonce"] = dpop_authserver_nonce
+            refreshed_token["dpop_private_jwk"] = token["dpop_private_jwk"]
+            refreshed_token["pds_url"] = pds_url
+            refreshed_token["authserver_iss"] = token["authserver_iss"]
 
-        resp = pds_authed_req("POST", req_url, token=refreshed_token, body=body)
-        if resp.status_code not in [200, 201]:
-            logger.error("PDS HTTP Error: %s", resp.json())
-        resp.raise_for_status()
+            resp = pds_authed_req("POST", req_url, token=refreshed_token, body=body)
+            if resp.status_code not in [200, 201]:
+                logger.error("PDS HTTP Error: %s", resp.json())
+            resp.raise_for_status()
 
-        logger.info("Successfully sent message.")
-        return {"success": True, "refreshed_token": refreshed_token}
+            logger.info("Successfully sent message.")
+            return {"success": True, "refreshed_token": refreshed_token}
+        except requests.exceptions.HTTPError as e:
+            logger.error("Failed to send message: %s", e)
+            return {
+                "success": False,
+                "error": e.response.text,
+                "refreshed_token": refreshed_token,
+            }
