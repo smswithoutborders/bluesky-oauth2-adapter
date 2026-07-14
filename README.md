@@ -122,4 +122,4 @@ python3 bluesky_cli.py send-message -f session.json -m "Hello, Bluesky!" -o sess
 
 ## TODO
 
-- Support additional PDS providers beyond just https://bsky.social
+- Support additional PDS providers beyond just <https://bsky.social>
