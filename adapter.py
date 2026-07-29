@@ -20,15 +20,9 @@ from config import Credentials, load_credentials
 from logutils import get_logger
 from protocol_interfaces import OAuth2ProtocolInterface
 from session_store import SessionStore
+from utils import require
 
 logger = get_logger(__name__)
-
-
-def _require(kwargs: dict, *fields: str) -> tuple:
-    missing = [f for f in fields if not kwargs.get(f)]
-    if missing:
-        raise ValueError(f"Missing required parameter(s): {', '.join(missing)}")
-    return tuple(kwargs[f] for f in fields)
 
 
 class BlueskyOAuth2Adapter(OAuth2ProtocolInterface):
@@ -40,7 +34,7 @@ class BlueskyOAuth2Adapter(OAuth2ProtocolInterface):
         self.sessions = SessionStore(self.credentials)
 
     def get_authorization_url(self, **kwargs) -> Dict[str, Any]:
-        (request_identifier,) = _require(kwargs, "request_identifier")
+        (request_identifier,) = require(kwargs, "request_identifier")
 
         code_verifier = kwargs.get("code_verifier")
         autogenerate_code_verifier = kwargs.get("autogenerate_code_verifier", False)
@@ -104,7 +98,7 @@ class BlueskyOAuth2Adapter(OAuth2ProtocolInterface):
         }
 
     def exchange_code_and_fetch_user_info(self, code: str, **kwargs) -> Dict[str, Any]:
-        (request_identifier, code_verifier) = _require(
+        (request_identifier, code_verifier) = require(
             kwargs, "request_identifier", "code_verifier"
         )
         redirect_uri = kwargs.get("redirect_url") or self.credentials.redirect_uri
@@ -152,7 +146,7 @@ class BlueskyOAuth2Adapter(OAuth2ProtocolInterface):
         return True
 
     def send_message(self, token: dict, **kwargs) -> Dict[str, Any]:
-        (message,) = _require(kwargs, "message")
+        (message,) = require(kwargs, "message")
 
         processed_attachments = []
         for idx, att_dict in enumerate(kwargs.get("attachments") or []):

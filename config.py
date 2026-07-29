@@ -1,13 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from logutils import get_logger
 
 logger = get_logger(__name__)
+
+_PACKAGE_DIR = Path(__file__).parent
 
 DEFAULT_PDS_URL = "https://bsky.social"
 DEFAULT_SCOPE = "atproto transition:generic"
@@ -22,8 +24,7 @@ DEFAULT_PDS_DPOP_TTL = 10
 
 @dataclass
 class Credentials:
-    """see https://atproto.com/specs/oauth for AT Protocol OAuth
-    client metadata)."""
+    """See https://atproto.com/specs/oauth for AT Protocol OAuth client metadata."""
 
     CLIENT_ID: str
     REDIRECT_URIS: List[str]
@@ -40,8 +41,6 @@ class Credentials:
     AUTHSERVER_DPOP_TTL: int = DEFAULT_AUTHSERVER_DPOP_TTL
     PDS_DPOP_TTL: int = DEFAULT_PDS_DPOP_TTL
 
-    _package_dir: Path = field(default=Path(__file__).parent, repr=False, compare=False)
-
     @property
     def redirect_uri(self) -> str:
         return self.REDIRECT_URIS[0]
@@ -55,13 +54,13 @@ class Credentials:
             return Path(base_path).expanduser()
         if self.SESSIONS_DIR:
             return Path(self.SESSIONS_DIR).expanduser()
-        return self._package_dir / DEFAULT_SESSIONS_DIRNAME
+        return _PACKAGE_DIR / DEFAULT_SESSIONS_DIRNAME
 
     def db_path(self, base_path: Optional[str] = None) -> Path:
         return self.sessions_dir(base_path) / self.DB_FILENAME
 
     def schema_path(self) -> Path:
-        return self._package_dir / self.SCHEMA_FILENAME
+        return _PACKAGE_DIR / self.SCHEMA_FILENAME
 
 
 _REQUIRED_FIELDS = {"client_id", "redirect_uris"}

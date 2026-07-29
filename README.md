@@ -80,45 +80,22 @@ sudo apt install build-essential python3-dev
 >
 > If you are developing on localhost, OAuth2 authorization servers require HTTPS protocol for redirect URIs. You can use tools like [ngrok](https://ngrok.com/), [localtunnel](https://github.com/localtunnel/localtunnel), or [VS Code tunnel](https://code.visualstudio.com/docs/remote/tunnels) to tunnel your localhost to an HTTPS alternative.
 
-## Using the CLI
+## Testing
 
-> [!NOTE]
->
-> Use the `--help` flag with any command to see the available parameters and their descriptions.
-
-### 1. **Generate Authorization URL**
-
-Use the `auth-url` command to generate the OAuth2 authorization URL.
+For exercising the flow without hand-crafting IPC JSON, use the interactive REPL in `tests/client.py`. The token is persisted to `tests/session.json`:
 
 ```bash
-python3 bluesky_cli.py auth-url -o session.json
+python -m tests.client
 ```
 
-- `-o`: Save the output to `session.json`.
-
-### 2. **Exchange Authorization Code**
-
-Use the `exchange` command to exchange the authorization code for tokens and user info.
-
-```bash
-python3 bluesky_cli.py exchange -c auth_code -o session.json -f session.json
-```
-
-- `-c`: Authorization code.
-- `-o`: Save the output to `session.json`.
-- `-f`: Read parameters from `session.json`.
-
-### 3. **Send a Message**
-
-Use the `send-message` command to send a message using the adapter.
-
-```bash
-python3 bluesky_cli.py send-message -f session.json -m "Hello, Bluesky!" -o session.json
-```
-
-- `-f`: Read parameters from `session.json`.
-- `-m`: Message to send.
-- `-o`: Save the output to `session.json`.
+| Command        | Arguments             | Description                                                        |
+| -------------- | ---------------------- | ------------------------------------------------------------------- |
+| `auth_url`     | `[request_identifier]` | Generate the OAuth2 authorization URL, auto-generates an identifier if omitted |
+| `exchange`     | `<code>`               | Exchange an authorization code for a token, using the last `auth_url` session |
+| `send_message` | `<message>`            | Send a message using the stored token                               |
+| `revoke`       | -                       | Revoke the stored token                                             |
+| `help`         | `[command]`             | Show available commands, or detail for one command                  |
+| `quit`         | -                       | Exit the client                                                     |
 
 ## TODO
 
