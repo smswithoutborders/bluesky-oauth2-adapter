@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Small helpers shared across adapter method implementations."""
 
 
 def require(kwargs: dict, *fields: str) -> tuple:
