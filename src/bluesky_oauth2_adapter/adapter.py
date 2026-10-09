@@ -149,7 +149,7 @@ class BlueskyAdapter(OAuth2Adapter):
                     token, request.message.body, list(request.message.attachments)
                 )
         except AdapterError as e:
-            e.data = {**(e.data or {}), "token": token}
+            e.token = token
             raise
         logger.info("Posted %d post(s).", len(posts))
         return SendResult(token=token)
