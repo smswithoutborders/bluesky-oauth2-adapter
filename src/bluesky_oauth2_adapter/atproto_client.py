@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 import json
+import logging
 import math
 import re
 import textwrap
 import time
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import UTC, datetime
+from typing import Any
 from urllib.parse import urlparse
 
 import dns.resolver
@@ -16,11 +16,11 @@ import requests_hardened
 from authlib.common.security import generate_token
 from authlib.jose import JsonWebKey, jwt
 from authlib.oauth2.rfc7636 import create_s256_code_challenge
+from relaysms_adapter_sdk import Attachment
 
-from config import Credentials
-from logutils import get_logger
+from bluesky_oauth2_adapter.credentials import Credentials
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 HANDLE_REGEX = (
     r"^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)"
@@ -30,6 +30,11 @@ DID_REGEX = r"^did:[a-z]+:[a-zA-Z0-9._:%-]*[a-zA-Z0-9._-]$"
 MAX_EMBED_IMAGES = 4
 MAX_IMAGE_BYTES = 1000000
 SUPPORTED_IMAGE_MIMETYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+CHARACTER_LIMIT = 300
+# Room for the " (n/m)" each post of a thread ends with.
+THREAD_SUFFIX_RESERVE = 10
+AUTHSERVER_DPOP_TTL = 30
+PDS_DPOP_TTL = 10
 
 
 class ATProtoError(Exception):
@@ -82,7 +87,7 @@ def is_safe_url(url: str) -> bool:
     return not segments[-1].isdigit()
 
 
-def handle_from_doc(doc: dict) -> Optional[str]:
+def handle_from_doc(doc: dict) -> str | None:
     for aka in doc.get("alsoKnownAs", []):
         if aka.startswith("at://"):
             handle = aka[5:]
@@ -98,19 +103,21 @@ def pds_endpoint(doc: dict) -> str:
     raise AuthServerError("PDS endpoint not found in DID document.")
 
 
-@dataclass
-class Attachment:
-    data: bytes
-    filename: str
-    mimetype: str
+def split_message(message: str) -> list[str]:
+    """Split a message into posts that fit Bluesky's character limit."""
+    if len(message) <= CHARACTER_LIMIT:
+        return [message]
+    posts = math.ceil(len(message) / (CHARACTER_LIMIT - THREAD_SUFFIX_RESERVE))
+    width = math.ceil(len(message) / posts)
+    return textwrap.wrap(message, width, break_long_words=False)
 
 
 def create_post_payload(
     did: str,
     text: str,
     created_at: str,
-    reply_to: Optional[dict] = None,
-    embed: Optional[dict] = None,
+    reply_to: dict | None = None,
+    embed: dict | None = None,
 ) -> dict:
     """Create a Bluesky post record payload."""
     payload = {
@@ -142,7 +149,7 @@ class ATProtoClient:
             )
         )
 
-    def resolve_handle(self, handle: str) -> Optional[str]:
+    def resolve_handle(self, handle: str) -> str | None:
         try:
             for record in dns.resolver.resolve(f"_atproto.{handle}", "TXT"):
                 val = record.to_text().replace('"', "")
@@ -166,7 +173,7 @@ class ATProtoClient:
         did = resp.text.split()[0]
         return did if is_valid_did(did) else None
 
-    def resolve_did(self, did: str) -> Optional[dict]:
+    def resolve_did(self, did: str) -> dict | None:
         if did.startswith("did:plc:"):
             resp = requests.get(f"https://plc.directory/{did}")
             if resp.status_code != 200:
@@ -189,7 +196,7 @@ class ATProtoClient:
 
         raise InvalidIdentifierError(f"Unsupported DID method: {did}")
 
-    def resolve_identity(self, atid: str) -> Tuple[str, str, dict]:
+    def resolve_identity(self, atid: str) -> tuple[str, str, dict]:
         if is_valid_handle(atid):
             handle = atid
             did = self.resolve_handle(handle)
@@ -224,7 +231,7 @@ class ATProtoClient:
 
         raise InvalidIdentifierError(f"'{atid}' is not a valid handle or DID.")
 
-    def resolve_account(self, atid: str) -> Dict[str, str]:
+    def resolve_account(self, atid: str) -> dict[str, str]:
         did, handle, doc = self.resolve_identity(atid)
         pds_url = pds_endpoint(doc)
         authserver_url = self.resolve_pds_authserver(pds_url)
@@ -271,8 +278,8 @@ class ATProtoClient:
         resp.raise_for_status()
         return resp.json()["authorization_servers"][0]
 
-    def fetch_authserver_meta(self, authserver_url: Optional[str] = None) -> dict:
-        url = authserver_url or self.credentials.PDS_URL
+    def fetch_authserver_meta(self, authserver_url: str | None = None) -> dict:
+        url = authserver_url or self.credentials.pds_url
         if not is_safe_url(url):
             raise AuthServerError(f"Unsafe auth server URL: {url}")
 
@@ -298,7 +305,7 @@ class ATProtoClient:
             "htm": method,
             "htu": url,
             "iat": int(time.time()),
-            "exp": int(time.time()) + self.credentials.AUTHSERVER_DPOP_TTL,
+            "exp": int(time.time()) + AUTHSERVER_DPOP_TTL,
         }
         if nonce:
             body["nonce"] = nonce
@@ -312,7 +319,7 @@ class ATProtoClient:
         pub_jwk = json.loads(key.as_json(is_private=False))
         body = {
             "iat": int(time.time()),
-            "exp": int(time.time()) + self.credentials.PDS_DPOP_TTL,
+            "exp": int(time.time()) + PDS_DPOP_TTL,
             "jti": generate_token(),
             "htm": method,
             "htu": url,
@@ -326,8 +333,8 @@ class ATProtoClient:
 
     def _post_with_dpop_retry(
         self, url: str, data: dict, key: JsonWebKey, nonce: str
-    ) -> Tuple[Any, str]:
-        """POST a DPoP-protected auth-server request, retrying once on a fresh nonce challenge."""
+    ) -> tuple[Any, str]:
+        """POST a DPoP-protected request, retrying once on a new nonce challenge."""
         if not is_safe_url(url):
             raise AuthServerError(f"Unsafe auth server endpoint: {url}")
 
@@ -360,10 +367,10 @@ class ATProtoClient:
         redirect_uri: str,
         scope: str,
         dpop_private_jwk: JsonWebKey,
-        state: Optional[str] = None,
-        pkce_verifier: Optional[str] = None,
-        login_hint: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        state: str | None = None,
+        pkce_verifier: str | None = None,
+        login_hint: str | None = None,
+    ) -> dict[str, Any]:
         par_url = authserver_meta["pushed_authorization_request_endpoint"]
 
         par_body = {
@@ -403,7 +410,7 @@ class ATProtoClient:
         dpop_private_jwk_json: str,
         dpop_authserver_nonce: str,
         authserver_iss: str,
-    ) -> Tuple[dict, str]:
+    ) -> tuple[dict, str]:
         authserver_meta = self.fetch_authserver_meta(authserver_iss)
 
         params = {
@@ -423,7 +430,7 @@ class ATProtoClient:
 
         return resp.json(), dpop_authserver_nonce
 
-    def refresh_token(self, token: dict, client_id: str) -> Tuple[dict, str]:
+    def refresh_token(self, token: dict, client_id: str) -> tuple[dict, str]:
         authserver_meta = self.fetch_authserver_meta(token["authserver_iss"])
 
         params = {
@@ -450,9 +457,9 @@ class ATProtoClient:
         method: str,
         url: str,
         token: dict,
-        json_body: Optional[dict] = None,
-        raw_data: Optional[bytes] = None,
-        content_type: Optional[str] = None,
+        json_body: dict | None = None,
+        raw_data: bytes | None = None,
+        content_type: str | None = None,
     ) -> Any:
         key = JsonWebKey.import_key(json.loads(token["dpop_private_jwk"]))
         dpop_pds_nonce = token.get("dpop_pds_nonce")
@@ -512,7 +519,7 @@ class ATProtoClient:
         resp.raise_for_status()
         return resp.json()["blob"]
 
-    def build_images_embed(self, token: dict, attachments: List[Attachment]) -> dict:
+    def build_images_embed(self, token: dict, attachments: list[Attachment]) -> dict:
         if len(attachments) > MAX_EMBED_IMAGES:
             raise AttachmentError(
                 f"Bluesky posts support at most {MAX_EMBED_IMAGES} images, "
@@ -525,30 +532,18 @@ class ATProtoClient:
         ]
         return {"$type": "app.bsky.embed.images", "images": images}
 
-    def split_message_into_chunks(self, message: str) -> List[str]:
-        """Split a message into chunks that fit within Bluesky's character limit."""
-        max_length = self.credentials.CHARACTER_LIMIT
-        if len(message) <= max_length:
-            return [message]
-
-        effective_max_length = max_length - self.credentials.THREAD_SUFFIX_RESERVE
-        threads_required = math.ceil(len(message) / effective_max_length)
-        chars_per_thread = math.ceil(len(message) / threads_required)
-
-        return textwrap.wrap(message, chars_per_thread, break_long_words=False)
-
     def post_thread(
-        self, token: dict, message: str, attachments: Optional[List[Attachment]] = None
-    ) -> List[dict]:
+        self, token: dict, message: str, attachments: list[Attachment] | None = None
+    ) -> list[dict]:
         did = token["sub"]
         req_url = f"{token['pds_url']}/xrpc/com.atproto.repo.createRecord"
-        chunks = self.split_message_into_chunks(message)
+        chunks = split_message(message)
         embed = self.build_images_embed(token, attachments) if attachments else None
 
-        thread_posts: List[dict] = []
+        thread_posts: list[dict] = []
         parent_post = None
         root_post = None
-        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
         for i, chunk in enumerate(chunks):
             thread_text = (
@@ -573,6 +568,6 @@ class ATProtoClient:
             if i == 0:
                 root_post = post_reference
             parent_post = post_reference
-            now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
         return thread_posts
