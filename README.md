@@ -1,65 +1,10 @@
 # Bluesky OAuth2 Platform Adapter
 
-This adapter provides a pluggable implementation for integrating Bluesky as a messaging platform. It is designed to work with [RelaySMS Publisher](https://github.com/smswithoutborders/RelaySMS-Publisher), enabling users to connect to Bluesky using OAuth2 authentication.
+Lets [RelaySMS Publisher](https://github.com/smswithoutborders/RelaySMS-Publisher) users post to their Bluesky account. Long messages become a thread, with up to four images on the first post. Built with the [RelaySMS Adapter SDK](https://github.com/smswithoutborders/RelaySMS-Publisher/tree/main/sdk).
 
-## Requirements
+## Credentials
 
-- **Python**: Version >=
-  [3.8.10](https://www.python.org/downloads/release/python-3810/)
-- **Python Virtual Environments**:
-  [Documentation](https://docs.python.org/3/tutorial/venv.html)
-
-## Dependencies
-
-### On Ubuntu
-
-Install the necessary system packages:
-
-```bash
-sudo apt install build-essential python3-dev
-```
-
-## Installation
-
-1. **Create a virtual environment:**
-
-   ```bash
-   python3 -m venv venv
-   ```
-
-2. **Activate the virtual environment:**
-
-   ```bash
-   . venv/bin/activate
-   ```
-
-3. **Install the required Python packages:**
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-## Configuration
-
-1. **Host your client metadata JSON document:**  
-   Every atproto OAuth client must publish a client metadata JSON document on a publicly accessible URL.
-
-   - The `client_id` is the full `https://` URL where this JSON document is hosted.
-   - For more details, see the [atproto OAuth client documentation](https://docs.bsky.app/docs/advanced-guides/oauth-client#client-and-server-metadata).
-
-2. **Configure the credentials file path:**
-   - In your `config.ini`, set the path to your `credentials.json` file as shown below:
-
-```ini
-   [credentials]
-   path = ./credentials.json
-```
-
-3. **Create your `credentials.json` file:**
-   - This file should contain your client metadata.
-   - Below is an example of what your `credentials.json` might look like:
-
-**Sample `credentials.json`**
+An atproto client is identified by its public [client metadata document](https://docs.bsky.app/docs/advanced-guides/oauth-client#client-and-server-metadata): `client_id` is the `https://` URL it's served at. Put the document in the adapter's config directory as `credentials.json`; the Publisher keeps it at `data/platforms/config/<adapter id>/credentials.json` and serves it at `/v1/platforms/bluesky/oauth/client-metadata.json`.
 
 ```json
 {
@@ -76,27 +21,28 @@ sudo apt install build-essential python3-dev
 }
 ```
 
-> [!TIP]
->
-> If you are developing on localhost, OAuth2 authorization servers require HTTPS protocol for redirect URIs. You can use tools like [ngrok](https://ngrok.com/), [localtunnel](https://github.com/localtunnel/localtunnel), or [VS Code tunnel](https://code.visualstudio.com/docs/remote/tunnels) to tunnel your localhost to an HTTPS alternative.
+Add `"pds_url"` to use an auth server other than `https://bsky.social`.
 
-## Testing
-
-For exercising the flow without hand-crafting IPC JSON, use the interactive REPL in `tests/client.py`. The token is persisted to `tests/session.json`:
+## Develop
 
 ```bash
-python -m tests.client
+python3 -m venv venv
+venv/bin/pip install -e '.[dev]'
+venv/bin/pytest
 ```
 
-| Command        | Arguments             | Description                                                        |
-| -------------- | ---------------------- | ------------------------------------------------------------------- |
-| `auth_url`     | `[request_identifier]` | Generate the OAuth2 authorization URL, auto-generates an identifier if omitted |
-| `exchange`     | `<code>`               | Exchange an authorization code for a token, using the last `auth_url` session |
-| `send_message` | `<message>`            | Send a message using the stored token                               |
-| `revoke`       | -                       | Revoke the stored token                                             |
-| `help`         | `[command]`             | Show available commands, or detail for one command                  |
-| `quit`         | -                       | Exit the client                                                     |
+To try it against Bluesky, use a [localhost client](https://atproto.com/specs/oauth#localhost-client-development), which needs no hosted metadata. Put this in `.relaysms/config/credentials.json`:
 
-## TODO
+```json
+{
+  "client_id": "http://localhost?redirect_uri=http%3A%2F%2F127.0.0.1%3A8765%2Fcallback&scope=atproto%20transition%3Ageneric",
+  "redirect_uris": ["http://127.0.0.1:8765/callback"]
+}
+```
 
-- Support additional PDS providers beyond just <https://bsky.social>
+Then link an account and post with the [`relaysms-adapter`](https://github.com/smswithoutborders/RelaySMS-Publisher/tree/main/sdk#try-it) console:
+
+```bash
+venv/bin/relaysms-adapter link
+venv/bin/relaysms-adapter send --attach ./photo.png
+```

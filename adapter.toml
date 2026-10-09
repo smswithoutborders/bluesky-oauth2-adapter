@@ -1,0 +1,10 @@
+entry = "bluesky_oauth2_adapter:BlueskyAdapter"
+name = "bluesky"
+display_name = "Bluesky"
+protocol = "oauth2"
+category = "text"
+offline_first = false
+
+[icons]
+svg = "https://raw.githubusercontent.com/smswithoutborders/bluesky-oauth2-adapter/main/icons/bluesky.svg"
+png = "https://raw.githubusercontent.com/smswithoutborders/bluesky-oauth2-adapter/main/icons/bluesky.png"
