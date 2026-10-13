@@ -4,12 +4,10 @@
 See https://atproto.com/specs/oauth for its fields.
 """
 
-import json
 from dataclasses import dataclass
 
-from relaysms_adapter_sdk import config_dir
+from relaysms_adapter_sdk import read_config
 
-FILENAME = "credentials.json"
 DEFAULT_PDS_URL = "https://bsky.social"
 DEFAULT_SCOPE = "atproto transition:generic"
 
@@ -28,17 +26,12 @@ def load() -> Credentials:
     Raises:
         ValueError: The file is invalid.
     """
-    path = config_dir() / FILENAME
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
-        raise ValueError(f"{path} is not valid JSON: {e}") from e
-
+    raw = read_config()
     if not isinstance(raw.get("client_id"), str) or not raw["client_id"].strip():
-        raise ValueError(f"client_id in {path} must be a non-empty string.")
+        raise ValueError("client_id in credentials.json must be a non-empty string.")
     redirect_uris = raw.get("redirect_uris")
     if not isinstance(redirect_uris, list) or not redirect_uris:
-        raise ValueError(f"redirect_uris in {path} must be a non-empty list.")
+        raise ValueError("redirect_uris in credentials.json must be a non-empty list.")
 
     return Credentials(
         client_id=raw["client_id"],
