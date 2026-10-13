@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -17,6 +18,7 @@ from relaysms_adapter_sdk import (
     SendRequest,
     TokenInvalidError,
     UpstreamError,
+    manifest,
 )
 from relaysms_adapter_sdk.paths import CONFIG_DIR_ENV, STATE_DIR_ENV
 
@@ -169,3 +171,15 @@ class TestSendMessage:
 def test_split_message():
     assert split_message("short") == ["short"]
     assert all(len(post) <= 290 for post in split_message("word " * 200))
+
+
+def test_adapter_toml_declares_every_setting():
+    declared = manifest.load(Path(__file__).parents[1]).config
+    assert {field.name for field in declared} == {
+        "client_id",
+        "redirect_uris",
+        "client_name",
+        "client_uri",
+        "scope",
+        "pds_url",
+    }

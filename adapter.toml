@@ -8,3 +8,27 @@ offline_first = false
 [icons]
 svg = "https://raw.githubusercontent.com/smswithoutborders/bluesky-oauth2-adapter/main/icons/bluesky.svg"
 png = "https://raw.githubusercontent.com/smswithoutborders/bluesky-oauth2-adapter/main/icons/bluesky.png"
+
+[config.client_id]
+required = true
+description = "URL the Publisher serves this client's metadata at: https://<publisher>/v1/platforms/bluesky/oauth/client-metadata.json."
+
+[config.redirect_uris]
+type = "list"
+required = true
+description = "Redirect URIs of the client. The first is the default."
+
+[config.client_name]
+required = true
+description = "Name shown on Bluesky's consent page."
+
+[config.client_uri]
+required = true
+description = "Homepage of the app, shown on Bluesky's consent page."
+
+[config.scope]
+required = true
+description = "Scopes to request, such as: atproto transition:generic."
+
+[config.pds_url]
+description = "Auth server to use. Default: https://bsky.social."

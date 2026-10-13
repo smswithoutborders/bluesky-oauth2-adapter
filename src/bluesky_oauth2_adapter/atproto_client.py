@@ -353,9 +353,7 @@ class ATProtoClient:
         resp = _do_post(nonce)
         if resp.status_code == 400 and resp.json().get("error") == "use_dpop_nonce":
             nonce = resp.headers["DPoP-Nonce"]
-            logger.warning(
-                "DPoP nonce required by auth server, retrying with new nonce."
-            )
+            logger.debug("Auth server sent a new DPoP nonce; retrying.")
             resp = _do_post(nonce)
 
         return resp, nonce
@@ -483,7 +481,7 @@ class ATProtoClient:
                 and resp.json().get("error") == "use_dpop_nonce"
             ):
                 dpop_pds_nonce = resp.headers["DPoP-Nonce"]
-                logger.warning("Retrying PDS request with new DPoP nonce.")
+                logger.debug("PDS sent a new DPoP nonce; retrying.")
                 continue
             break
 
