@@ -156,7 +156,8 @@ class BlueskyAdapter(OAuth2Adapter):
 
     @override
     def revoke(self, request: RevokeRequest) -> None:
-        # Bluesky tokens expire on their own; there's nothing to revoke yet.
+        # Does nothing: Bluesky tokens expire on their own, and this adapter doesn't
+        # call a revocation endpoint.
         return None
 
 
@@ -164,7 +165,7 @@ class BlueskyAdapter(OAuth2Adapter):
 def _upstream(rejected: type[AdapterError] = UpstreamError) -> Iterator[None]:
     """Map AT Protocol and HTTP failures to AdapterErrors.
 
-    rejected is raised when the server refuses the request itself.
+    rejected is raised when Bluesky answers 400, 401 or 403.
     """
     try:
         yield
