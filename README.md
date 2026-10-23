@@ -4,7 +4,7 @@ Lets [RelaySMS Publisher](https://github.com/smswithoutborders/RelaySMS-Publishe
 
 ## Settings
 
-An atproto client is identified by its public [client metadata document](https://docs.bsky.app/docs/advanced-guides/oauth-client#client-and-server-metadata). The Publisher serves it at `/v1/platforms/bluesky/oauth/client-metadata.json`, built from the settings described in [adapter.toml](adapter.toml), so `client_id` is that URL. On a Publisher, an administrator sets them with its [settings commands](https://github.com/smswithoutborders/RelaySMS-Publisher/blob/main/docs/platforms.md#settings) or REST API.
+An atproto client is identified by its public [client metadata document](https://docs.bsky.app/docs/advanced-guides/oauth-client#client-and-server-metadata). The Publisher serves it at `/v1/platforms/bluesky/oauth/client-metadata.json`, built from the settings described in [adapter.toml](adapter.toml), so `client_id` is that URL. On a Publisher, set them up as its [Bluesky guide](https://github.com/smswithoutborders/RelaySMS-Publisher/blob/main/docs/platforms/bluesky.md) describes.
 
 ## Develop
 
