@@ -11,7 +11,7 @@ license = "GPL-3.0-only"
 requires-python = ">=3.12"
 authors = [{ name = "Promise Fru", email = "info@promisefru.com" }]
 dependencies = [
-  "Authlib==1.6.12",
+  "Authlib==1.9.1",
   "dnspython==2.7.0",
   "requests==2.33.0",
   "requests-hardened==1.2.1",
